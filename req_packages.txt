@@ -1,0 +1,6 @@
+requests
+msgpack
+numpy
+matplotlib
+textblob
+pycurl

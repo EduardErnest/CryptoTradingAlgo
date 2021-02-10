@@ -1,0 +1,95 @@
+import sys
+import requests
+import datetime
+import time
+import zlib
+import msgpack
+import json
+
+sys.path.insert(0, "src")
+import helper_functions as hf
+import io_helper as ioh
+import datetime_helper as dh
+
+# API endpoint for the price data
+endpoint_url = "https://www.bitmex.com/api/v1/funding"
+
+# Save location
+path_save_data = "data"
+filename_save_data = "{:s}/funding_data.msgpack.zlib".format(path_save_data)
+
+# Start and end times
+datetime_start = datetime.datetime(2019, 6, 1)
+datetime_end = datetime.datetime(2020, 5, 30)
+
+funding_data = []
+
+# Start pointer to track multiple requests
+start_ptr = 0
+
+# get the data
+while start_ptr >= 0:
+	
+	# bug in bitmex ptr system, need to shift the start date forward for each request
+	if funding_data == []:
+		str_datetime_start = datetime_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+		start_ptr = 0
+	else:
+		str_datetime_start = funding_data[-1]["timestamp"]
+		start_ptr = 1
+	
+	# define the parameters of the request
+	params = {
+		"symbol" : "xbt",
+		"count" : 180,
+		"start" : start_ptr,
+		"startTime" : str_datetime_start,
+		"endTime" : datetime_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+	}
+	
+	# make the request
+	r = requests.request("GET", endpoint_url, params=params, timeout=10)
+	
+	# if the request was ok, add the data and increment the start_ptr
+	# else return an error
+	if r.status_code == 200:
+		temp_data = r.json()
+		start_ptr += 750
+	else:
+		raise Exception("api call failed with status_code {:d}".format(r.status_code))
+	
+	# if we didn't get any data, assume we've got all the data
+	# else add the data to the data store
+	if len(temp_data) == 0:
+		start_ptr = -1
+	else:
+		
+		# convert the iso timestamps to epoch times
+		for td in temp_data:
+			t_epoch = dh.timestamp_to_epoch(td["timestamp"], "%Y-%m-%dT%H:%M:%S.000Z")
+			td.update({"t_epoch" : t_epoch})
+		
+		# extend the data store
+		funding_data.extend(temp_data)
+		
+		# print the progress
+		str_print = "got data from {:s} to {:s}".format(*(temp_data[0]["timestamp"],
+		                                                temp_data[-1]["timestamp"],))
+		print(str_print)
+	
+	# sleep
+	time.sleep(2.1)
+
+# print(json.dumps(funding_data,indent=4))
+# print(funding_data[0])
+
+# check if the data path exists
+ioh.check_path(path_save_data, create_if_not_exist=True)
+
+# save the data
+print("saving data to {:s}".format(filename_save_data))
+with open(filename_save_data, "wb") as f:
+	f.write(zlib.compress(msgpack.packb(funding_data)))
+
+print("done!")
+
